@@ -22,9 +22,13 @@ def build():
         f"--icon={icon_path}",
         f"--add-data={icon_path};.",
         f"--paths={root / 'src'}",
+        "--collect-all=nassimdl",
         "--hidden-import=aiosqlite",
         "--hidden-import=aiohttp",
         "--hidden-import=tkinter",
+        "--hidden-import=sqlite3",
+        "--hidden-import=uvicorn",
+        "--hidden-import=fastapi",
         str(entry_script),
     ]
 
