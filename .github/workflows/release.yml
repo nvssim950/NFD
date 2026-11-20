@@ -1,0 +1,49 @@
+name: Build and Release NFD
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install . pyinstaller pytest pytest-asyncio
+
+      - name: Run test suite
+        run: |
+          python -m pytest tests
+
+      - name: Build standalone executable
+        run: |
+          python build_exe.py
+
+      - name: Package release archive
+        run: |
+          mkdir release-package
+          Copy-Item -Recurse -Path dist\NFD\* -Destination release-package\
+          Copy-Item -Recurse -Path extensions -Destination release-package\extensions
+          Compress-Archive -Path release-package\* -DestinationPath NFD-Windows-x64.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: NFD-Windows-x64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

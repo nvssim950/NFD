@@ -1,0 +1,18 @@
+services:
+  nfd:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: nfd-downloader
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./downloads:/downloads
+      - nfd-config:/root/.nassimdl
+    environment:
+      - PYTHONUNBUFFERED=1
+      - NASSIMDL_OUTPUT_DIR=/downloads
+
+volumes:
+  nfd-config:

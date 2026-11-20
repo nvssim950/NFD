@@ -1,0 +1,677 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NassimDL — High-Speed Download Accelerator</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #0b0f17;
+      --card-bg: rgba(22, 29, 44, 0.7);
+      --card-border: rgba(255, 255, 255, 0.08);
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.25);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --purple: #a855f7;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --font-sans: 'Plus Jakarta Sans', system-ui, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg);
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(56, 189, 248, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.1) 0px, transparent 50%);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    header {
+      padding: 1.25rem 2rem;
+      border-bottom: 1px solid var(--card-border);
+      backdrop-filter: blur(12px);
+      position: sticky;
+      top: 0;
+      z-index: 50;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(11, 15, 23, 0.8);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      font-weight: 800;
+      font-size: 1.25rem;
+      letter-spacing: -0.02em;
+    }
+
+    .brand-icon {
+      width: 34px;
+      height: 34px;
+      background: linear-gradient(135deg, var(--accent), var(--purple));
+      border-radius: 9px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 0 15px var(--accent-glow);
+    }
+
+    .brand span {
+      background: linear-gradient(to right, #ffffff, #cbd5e1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .btn {
+      padding: 0.55rem 1.15rem;
+      border-radius: 8px;
+      font-size: 0.875rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: 1px solid transparent;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+      font-family: inherit;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0b0f17;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.35);
+    }
+
+    .btn-primary:hover {
+      background: #7dd3fc;
+      transform: translateY(-1px);
+    }
+
+    .btn-ghost {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: var(--card-border);
+      color: var(--text-main);
+    }
+
+    .btn-ghost:hover {
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border-color: rgba(239, 68, 68, 0.3);
+    }
+
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.25);
+    }
+
+    main {
+      flex: 1;
+      max-width: 1200px;
+      width: 100%;
+      margin: 0 auto;
+      padding: 2rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.5rem;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      gap: 1rem;
+    }
+
+    .stat-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 1.25rem;
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+
+    .stat-title {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
+
+    .stat-value {
+      font-size: 1.85rem;
+      font-weight: 800;
+      font-family: var(--font-mono);
+      color: #ffffff;
+    }
+
+    .stat-sub {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+
+    .downloads-container {
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 0.5rem;
+    }
+
+    .section-title {
+      font-size: 1.15rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+    }
+
+    .dl-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      backdrop-filter: blur(10px);
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      transition: border-color 0.2s;
+    }
+
+    .dl-card:hover {
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .dl-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 1rem;
+    }
+
+    .dl-file-info {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+      min-width: 0;
+    }
+
+    .dl-filename {
+      font-size: 1.05rem;
+      font-weight: 700;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      color: #ffffff;
+    }
+
+    .dl-url {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-family: var(--font-mono);
+    }
+
+    .status-badge {
+      padding: 0.3rem 0.7rem;
+      border-radius: 9999px;
+      font-size: 0.72rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .status-downloading { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+    .status-completed { background: rgba(16, 185, 129, 0.15); color: var(--success); }
+    .status-paused { background: rgba(245, 158, 11, 0.15); color: var(--warning); }
+    .status-merging { background: rgba(168, 85, 247, 0.15); color: var(--purple); }
+    .status-error { background: rgba(239, 68, 68, 0.15); color: var(--danger); }
+    .status-queued { background: rgba(148, 163, 184, 0.15); color: var(--text-muted); }
+
+    /* Main Progress Bar */
+    .progress-bar-wrap {
+      width: 100%;
+      height: 8px;
+      background: rgba(255, 255, 255, 0.06);
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: linear-gradient(to right, var(--accent), var(--purple));
+      border-radius: 999px;
+      transition: width 0.3s ease;
+    }
+
+    /* Segment Visualization Bars */
+    .segments-visualizer {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      background: rgba(0, 0, 0, 0.2);
+      border: 1px solid rgba(255, 255, 255, 0.04);
+      padding: 0.75rem;
+      border-radius: 10px;
+    }
+
+    .segments-label {
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      display: flex;
+      justify-content: space-between;
+    }
+
+    .segments-track {
+      display: flex;
+      gap: 3px;
+      height: 12px;
+      width: 100%;
+    }
+
+    .segment-chunk {
+      flex: 1;
+      height: 100%;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 2px;
+      position: relative;
+      overflow: hidden;
+      cursor: pointer;
+    }
+
+    .segment-chunk-fill {
+      height: 100%;
+      background: var(--accent);
+      transition: width 0.2s linear;
+    }
+
+    .segment-chunk.completed .segment-chunk-fill {
+      background: var(--success);
+    }
+
+    .segment-chunk.error .segment-chunk-fill {
+      background: var(--danger);
+    }
+
+    .dl-metrics {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .dl-actions {
+      display: flex;
+      gap: 0.5rem;
+    }
+
+    /* Modal */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(8px);
+      z-index: 100;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+
+    .modal-backdrop.active {
+      display: flex;
+    }
+
+    .modal {
+      background: #141b2b;
+      border: 1px solid var(--card-border);
+      border-radius: 16px;
+      max-width: 520px;
+      width: 100%;
+      padding: 1.75rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+    }
+
+    .modal-title {
+      font-size: 1.25rem;
+      font-weight: 700;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    .form-label {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    .form-input {
+      background: rgba(0, 0, 0, 0.35);
+      border: 1px solid var(--card-border);
+      border-radius: 8px;
+      padding: 0.7rem 0.9rem;
+      color: var(--text-main);
+      font-family: inherit;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .form-input:focus {
+      border-color: var(--accent);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 0.75rem;
+      margin-top: 0.5rem;
+    }
+
+    .empty-state {
+      text-align: center;
+      padding: 4rem 1rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .empty-icon {
+      font-size: 2.5rem;
+      opacity: 0.5;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="brand">
+      <div class="brand-icon">
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#0b0f17" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+          <polyline points="7 10 12 15 17 10"></polyline>
+          <line x1="12" y1="15" x2="12" y2="3"></line>
+        </svg>
+      </div>
+      <div>Nassim<span>DL</span></div>
+    </div>
+    <div class="header-actions">
+      <button class="btn btn-primary" onclick="openAddModal()">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+          <line x1="12" y1="5" x2="12" y2="19"></line>
+          <line x1="5" y1="12" x2="19" y2="12"></line>
+        </svg>
+        New Download
+      </button>
+    </div>
+  </header>
+
+  <main>
+    <div class="stats-grid">
+      <div class="stat-card">
+        <div class="stat-title">Current Throughput</div>
+        <div class="stat-value" id="global-speed">0 B/s</div>
+        <div class="stat-sub">Across all parallel streams</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Active Downloads</div>
+        <div class="stat-value" id="active-count">0</div>
+        <div class="stat-sub">Queued or transferring</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-title">Completed Files</div>
+        <div class="stat-value" id="completed-count">0</div>
+        <div class="stat-sub">Ready in output folder</div>
+      </div>
+    </div>
+
+    <div class="section-header">
+      <div class="section-title">Transfer Queue</div>
+    </div>
+
+    <div class="downloads-container" id="downloads-list">
+      <div class="empty-state">
+        <div class="empty-icon">📥</div>
+        <div>No downloads yet. Click "New Download" to start accelerating!</div>
+      </div>
+    </div>
+  </main>
+
+  <!-- Add Download Modal -->
+  <div class="modal-backdrop" id="add-modal">
+    <div class="modal">
+      <div class="modal-title">Add New Download</div>
+      <div class="form-group">
+        <label class="form-label">Download URL *</label>
+        <input type="text" class="form-input" id="input-url" placeholder="https://example.com/file.zip" required>
+      </div>
+      <div class="form-group">
+        <label class="form-label">Custom Filename (optional)</label>
+        <input type="text" class="form-input" id="input-filename" placeholder="Leave empty for auto-detection">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Parallel Segments (Connections)</label>
+        <input type="number" class="form-input" id="input-segments" value="8" min="1" max="32">
+      </div>
+      <div class="form-group">
+        <label class="form-label">Expected SHA-256 Checksum (optional)</label>
+        <input type="text" class="form-input" id="input-hash" placeholder="Auto-verified upon completion">
+      </div>
+      <div class="modal-actions">
+        <button class="btn btn-ghost" onclick="closeAddModal()">Cancel</button>
+        <button class="btn btn-primary" onclick="submitAddDownload()">Start Download</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    let ws = null;
+
+    function connectWS() {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const wsUrl = `${protocol}//${window.location.host}/ws`;
+      ws = new WebSocket(wsUrl);
+
+      ws.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'stats') {
+            updateDashboard(data);
+          }
+        } catch (e) {
+          console.error(e);
+        }
+      };
+
+      ws.onclose = () => {
+        setTimeout(connectWS, 1500);
+      };
+    }
+
+    function updateDashboard(data) {
+      document.getElementById('global-speed').innerText = data.total_speed_formatted || '0 B/s';
+      document.getElementById('active-count').innerText = data.active_count || 0;
+
+      const downloads = data.downloads || [];
+      const completed = downloads.filter(d => d.status === 'completed').length;
+      document.getElementById('completed-count').innerText = completed;
+
+      const container = document.getElementById('downloads-list');
+      if (downloads.length === 0) {
+        container.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-icon">📥</div>
+            <div>No downloads yet. Click "New Download" to start accelerating!</div>
+          </div>`;
+        return;
+      }
+
+      container.innerHTML = downloads.map(dl => {
+        const isTransferring = dl.status === 'downloading';
+        const isPaused = dl.status === 'paused';
+        const isCompleted = dl.status === 'completed';
+
+        let segmentsHTML = '';
+        if (dl.segments && dl.segments.length > 0) {
+          const chunks = dl.segments.map(s => {
+            const cls = s.status === 'completed' ? 'completed' : (s.status === 'error' ? 'error' : '');
+            return `
+              <div class="segment-chunk ${cls}" title="Segment #${s.index + 1}: ${s.progress}% (${s.status})">
+                <div class="segment-chunk-fill" style="width: ${s.progress}%;"></div>
+              </div>`;
+          }).join('');
+
+          segmentsHTML = `
+            <div class="segments-visualizer">
+              <div class="segments-label">
+                <span>Parallel Connections (${dl.segments.length} Streams)</span>
+                <span>${dl.progress}%</span>
+              </div>
+              <div class="segments-track">${chunks}</div>
+            </div>`;
+        }
+
+        let actionBtns = '';
+        if (isTransferring) {
+          actionBtns += `<button class="btn btn-ghost" onclick="pauseDownload(${dl.id})">⏸ Pause</button>`;
+        } else if (isPaused) {
+          actionBtns += `<button class="btn btn-ghost" onclick="resumeDownload(${dl.id})">▶ Resume</button>`;
+        }
+        actionBtns += `<button class="btn btn-danger" onclick="deleteDownload(${dl.id})">✕ Remove</button>`;
+
+        return `
+          <div class="dl-card" id="dl-${dl.id}">
+            <div class="dl-top">
+              <div class="dl-file-info">
+                <div class="dl-filename">${escapeHtml(dl.filename)}</div>
+                <div class="dl-url">${escapeHtml(dl.url)}</div>
+              </div>
+              <span class="status-badge status-${dl.status}">${dl.status}</span>
+            </div>
+
+            <div class="progress-bar-wrap">
+              <div class="progress-bar-fill" style="width: ${dl.progress}%;"></div>
+            </div>
+
+            ${segmentsHTML}
+
+            <div class="dl-metrics">
+              <div>
+                <span>${dl.bytes_downloaded_formatted} / ${dl.file_size_formatted}</span>
+                ${isTransferring ? ` • <span style="color:var(--accent)">${dl.speed_formatted}</span> • ETA: ${dl.eta_formatted}` : ''}
+              </div>
+              <div class="dl-actions">
+                ${actionBtns}
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    function openAddModal() {
+      document.getElementById('add-modal').classList.add('active');
+      document.getElementById('input-url').focus();
+    }
+
+    function closeAddModal() {
+      document.getElementById('add-modal').classList.remove('active');
+    }
+
+    async function submitAddDownload() {
+      const url = document.getElementById('input-url').value.trim();
+      const filename = document.getElementById('input-filename').value.trim() || null;
+      const segments = parseInt(document.getElementById('input-segments').value) || 8;
+      const hash = document.getElementById('input-hash').value.trim() || null;
+
+      if (!url) return;
+
+      try {
+        const resp = await fetch('/api/downloads', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            url,
+            filename,
+            segments,
+            hash_value: hash,
+            hash_type: hash ? 'sha256' : null
+          })
+        });
+        if (resp.ok) {
+          closeAddModal();
+          document.getElementById('input-url').value = '';
+          document.getElementById('input-filename').value = '';
+        }
+      } catch (err) {
+        alert('Failed to add download: ' + err);
+      }
+    }
+
+    async function pauseDownload(id) {
+      await fetch(`/api/downloads/${id}/pause`, { method: 'POST' });
+    }
+
+    async function resumeDownload(id) {
+      await fetch(`/api/downloads/${id}/resume`, { method: 'POST' });
+    }
+
+    async function deleteDownload(id) {
+      if (confirm(`Remove download #${id}?`)) {
+        await fetch(`/api/downloads/${id}`, { method: 'DELETE' });
+      }
+    }
+
+    function escapeHtml(str) {
+      if (!str) return '';
+      return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    window.onload = connectWS;
+  </script>
+</body>
+</html>

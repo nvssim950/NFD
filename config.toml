@@ -1,0 +1,23 @@
+[download]
+max_concurrent = 3
+default_segments = 8
+output_dir = "~/Downloads"
+temp_dir = "~/.nassimdl/tmp"
+
+[download.segments_by_size]
+# file_size_mb = num_segments
+1 = 1
+10 = 4
+100 = 8
+1000 = 16
+
+[network]
+max_speed_bytes = 0  # 0 = unlimited
+timeout_seconds = 30
+max_retries = 5
+retry_delay_seconds = 2
+user_agent = "NassimDL/0.1.0"
+
+[logging]
+level = "INFO"
+file = "~/.nassimdl/nassimdl.log"
