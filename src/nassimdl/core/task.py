@@ -135,9 +135,16 @@ class DownloadTask:
         self.download.file_size = result.file_size
         self.download.supports_range = result.supports_range
 
-        # Update filename if not explicitly provided or defaulted
-        if (not self.download.filename or self.download.filename == "download") and result.filename:
-            self.download.filename = result.filename
+        # Update filename if server provided a filename (Content-Disposition) or if current has no extension
+        if result.filename:
+            curr_ext = Path(self.download.filename).suffix if self.download.filename else ""
+            res_ext = Path(result.filename).suffix if result.filename else ""
+            if not self.download.filename or self.download.filename == "download" or not curr_ext:
+                self.download.filename = result.filename
+            elif res_ext and not curr_ext:
+                self.download.filename = result.filename
+            elif result.filename != "download" and result.filename != self.download.filename:
+                self.download.filename = result.filename
 
         # Decide segment count
         if result.supports_range and result.file_size:
