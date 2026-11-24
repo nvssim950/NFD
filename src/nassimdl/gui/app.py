@@ -460,6 +460,7 @@ class NFDApp(tk.Tk):
             initial_url=url,
             initial_filename=filename or "",
             default_dir=self.config_data.download.output_dir,
+            default_segments=self.config_data.download.default_segments,
             on_submit=self._dispatch_add_download,
         )
 
@@ -478,6 +479,7 @@ class NFDApp(tk.Tk):
             self,
             initial_url=clipboard_text,
             default_dir=self.config_data.download.output_dir,
+            default_segments=self.config_data.download.default_segments,
             on_submit=self._dispatch_add_download,
         )
 
@@ -566,6 +568,7 @@ class NFDApp(tk.Tk):
         if self.manager:
             self.manager.set_speed_limit(self.config_data.network.max_speed_bytes)
             self.manager.config.download.max_concurrent = self.config_data.download.max_concurrent
+            self.manager.config.download.default_segments = self.config_data.download.default_segments
 
     # ── Refresh Loop ───────────────────────────────────────────────────
 

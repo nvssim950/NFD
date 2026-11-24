@@ -86,3 +86,37 @@ class AppConfig:
             if "file" in log:
                 config.logging.file = Path(log["file"]).expanduser()
         return config
+
+    def save(self, path: Optional[Path] = None) -> None:
+        """Save configuration to TOML file."""
+        if path is None:
+            path = Path.home() / ".nassimdl" / "config.toml"
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        output_dir_str = str(self.download.output_dir).replace("\\", "/")
+        temp_dir_str = str(self.download.temp_dir).replace("\\", "/")
+        log_file_str = str(self.logging.file).replace("\\", "/")
+
+        segments_map = ", ".join(f'"{k}" = {v}' for k, v in sorted(self.download.segments_by_size.items()))
+
+        content = f"""[download]
+max_concurrent = {self.download.max_concurrent}
+default_segments = {self.download.default_segments}
+output_dir = "{output_dir_str}"
+temp_dir = "{temp_dir_str}"
+segments_by_size = {{ {segments_map} }}
+
+[network]
+max_speed_bytes = {self.network.max_speed_bytes}
+timeout_seconds = {self.network.timeout_seconds}
+max_retries = {self.network.max_retries}
+retry_delay_seconds = {self.network.retry_delay_seconds}
+user_agent = "{self.network.user_agent}"
+
+[logging]
+level = "{self.logging.level}"
+file = "{log_file_str}"
+"""
+        with open(path, "w", encoding="utf-8") as f:
+            f.write(content)
+

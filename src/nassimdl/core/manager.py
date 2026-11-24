@@ -100,6 +100,7 @@ class DownloadManager:
             output_dir=output_dir or self.config.download.output_dir,
             hash_type=hash_type,
             expected_hash=hash_value,
+            num_segments=num_segments if num_segments is not None else self.config.download.default_segments,
         )
 
         if num_segments:

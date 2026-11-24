@@ -149,9 +149,12 @@ class DownloadTask:
         # Decide segment count
         if result.supports_range and result.file_size:
             if not self.download.num_segments or self.download.num_segments <= 1:
-                self.download.num_segments = self.config.download.get_segments_for_size(
-                    result.file_size
+                self.download.num_segments = (
+                    self.config.download.default_segments
+                    or self.config.download.get_segments_for_size(result.file_size)
                 )
+            if self.download.file_size and self.download.file_size < self.download.num_segments:
+                self.download.num_segments = max(1, self.download.file_size)
         else:
             self.download.num_segments = 1
 
@@ -188,6 +191,9 @@ class DownloadTask:
             )
             self.download.segments = [seg]
         else:
+            if file_size < num_segments:
+                num_segments = max(1, file_size)
+                self.download.num_segments = num_segments
             segment_size = file_size // num_segments
             segments = []
             for i in range(num_segments):

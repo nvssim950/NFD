@@ -37,7 +37,15 @@ def get_icon_paths() -> tuple[str | None, str | None]:
 class AddDownloadDialog(tk.Toplevel):
     """Professional dialog to add a new download URL."""
 
-    def __init__(self, parent, initial_url="", initial_filename="", default_dir=None, on_submit=None):
+    def __init__(
+        self,
+        parent,
+        initial_url="",
+        initial_filename="",
+        default_dir=None,
+        default_segments=8,
+        on_submit=None,
+    ):
         super().__init__(parent)
         self.title("Add New Download — NFD")
 
@@ -59,6 +67,7 @@ class AddDownloadDialog(tk.Toplevel):
 
         self.on_submit = on_submit
         self.default_dir = Path(default_dir or (Path.home() / "Downloads"))
+        self.default_segments = max(1, min(32, default_segments))
 
         # Spacious, high-DPI friendly geometry
         w = 760
@@ -73,6 +82,9 @@ class AddDownloadDialog(tk.Toplevel):
         x = max(0, (sw - w) // 2)
         y = max(0, (sh - h) // 2)
         self.geometry(f"{w}x{h}+{x}+{y}")
+
+        self.bind("<Return>", lambda e: self._confirm())
+        self.bind("<Escape>", lambda e: self.destroy())
 
         self._create_widgets(initial_url, initial_filename)
 
@@ -119,7 +131,7 @@ class AddDownloadDialog(tk.Toplevel):
         ttk.Label(opt_frame, text="Parallel Streams (Connections):", font=font_label).pack(
             side=tk.LEFT
         )
-        self.segments_var = tk.IntVar(value=8)
+        self.segments_var = tk.StringVar(value=str(self.default_segments))
         self.seg_spin = ttk.Spinbox(
             opt_frame, from_=1, to=32, textvariable=self.segments_var, width=6, font=font_label
         )
@@ -167,7 +179,12 @@ class AddDownloadDialog(tk.Toplevel):
 
         filename = self.filename_var.get().strip() or None
         output_dir = Path(self.dir_var.get().strip() or self.default_dir)
-        segments = int(self.segments_var.get())
+        try:
+            raw_seg = str(self.segments_var.get()).strip()
+            segments = int(raw_seg) if raw_seg else self.default_segments
+            segments = max(1, min(32, segments))
+        except Exception:
+            segments = self.default_segments
         hash_val = self.hash_var.get().strip() or None
 
         self.destroy()
@@ -213,6 +230,9 @@ class SettingsDialog(tk.Toplevel):
         y = max(0, (sh - h) // 2)
         self.geometry(f"{w}x{h}+{x}+{y}")
 
+        self.bind("<Return>", lambda e: self._save())
+        self.bind("<Escape>", lambda e: self.destroy())
+
         self._create_widgets()
 
     def _create_widgets(self):
@@ -225,7 +245,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(frame, text="Max Concurrent Downloads:", font=font_label).grid(
             row=0, column=0, sticky=tk.W, pady=12
         )
-        self.concurrent_var = tk.IntVar(value=self.config.download.max_concurrent)
+        self.concurrent_var = tk.StringVar(value=str(self.config.download.max_concurrent))
         ttk.Spinbox(frame, from_=1, to=10, textvariable=self.concurrent_var, width=8, font=font_label).grid(
             row=0, column=1, sticky=tk.W, pady=12
         )
@@ -234,7 +254,7 @@ class SettingsDialog(tk.Toplevel):
         ttk.Label(frame, text="Default Parallel Segments:", font=font_label).grid(
             row=1, column=0, sticky=tk.W, pady=12
         )
-        self.segments_var = tk.IntVar(value=self.config.download.default_segments)
+        self.segments_var = tk.StringVar(value=str(self.config.download.default_segments))
         ttk.Spinbox(frame, from_=1, to=32, textvariable=self.segments_var, width=8, font=font_label).grid(
             row=1, column=1, sticky=tk.W, pady=12
         )
@@ -276,12 +296,22 @@ class SettingsDialog(tk.Toplevel):
         try:
             from nassimdl.utils.autostart import set_autostart
             set_autostart(self.autostart_var.get())
-            self.config.download.max_concurrent = int(self.concurrent_var.get())
-            self.config.download.default_segments = int(self.segments_var.get())
-            speed_mb = int(self.speed_var.get().strip())
-            self.config.network.max_speed_bytes = speed_mb * 1024 * 1024
-        except ValueError:
-            messagebox.showerror("Invalid Input", "Please check your input values.", parent=self)
+
+            raw_conc = str(self.concurrent_var.get()).strip()
+            max_concurrent = int(raw_conc) if raw_conc else 3
+            self.config.download.max_concurrent = max(1, min(10, max_concurrent))
+
+            raw_seg = str(self.segments_var.get()).strip()
+            default_segments = int(raw_seg) if raw_seg else 8
+            self.config.download.default_segments = max(1, min(32, default_segments))
+
+            raw_speed = str(self.speed_var.get()).strip()
+            speed_mb = int(raw_speed) if raw_speed else 0
+            self.config.network.max_speed_bytes = max(0, speed_mb) * 1024 * 1024
+
+            self.config.save()
+        except Exception as e:
+            messagebox.showerror("Invalid Input", f"Please check your input values: {e}", parent=self)
             return
 
         self.destroy()
