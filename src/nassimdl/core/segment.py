@@ -11,6 +11,8 @@ import aiohttp
 
 from nassimdl.models.download import SegmentInfo, SegmentStatus
 from nassimdl.core.bandwidth import BandwidthController
+from nassimdl.core.adaptive import AdaptiveConcurrencyGate
+from nassimdl.utils.http import parse_retry_after
 
 logger = logging.getLogger(__name__)
 
@@ -18,6 +20,14 @@ logger = logging.getLogger(__name__)
 CHUNK_SIZE = 64 * 1024  # 64 KB
 # How often to persist progress (seconds)
 PROGRESS_SAVE_INTERVAL = 2.0
+
+
+class ThrottleResponseError(aiohttp.ClientResponseError):
+    """HTTP error carrying an optional Retry-After cooldown from the server."""
+
+    def __init__(self, *args, retry_after: Optional[float] = None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.retry_after = retry_after
 
 
 class SegmentWorker:
@@ -37,6 +47,7 @@ class SegmentWorker:
         timeout: int = 30,
         max_retries: int = 5,
         retry_delay: float = 2.0,
+        concurrency_gate: Optional[AdaptiveConcurrencyGate] = None,
         on_progress: Optional[Callable[[int, int, float], None]] = None,
         on_save_progress: Optional[Callable[..., None]] = None,
     ):
@@ -45,6 +56,7 @@ class SegmentWorker:
             segment: Segment metadata (byte range, progress, etc.)
             url: Download URL
             bandwidth: Shared bandwidth controller
+            concurrency_gate: Optional adaptive concurrency controller
             on_progress: Callback(segment_index, bytes_downloaded, speed)
             on_save_progress: Callback(segment_id, bytes_downloaded, status=None) for DB persistence
         """
@@ -55,6 +67,7 @@ class SegmentWorker:
         self.timeout = timeout
         self.max_retries = max_retries
         self.retry_delay = retry_delay
+        self.concurrency_gate = concurrency_gate
         self.on_progress = on_progress
         self.on_save_progress = on_save_progress
 
@@ -63,35 +76,97 @@ class SegmentWorker:
         self._cancelled = False
         self._speed: float = 0.0
 
+    def _reset_speed(self) -> None:
+        """Reset active speed gauge when idle, paused, finished, or retrying."""
+        if self._speed != 0.0:
+            self._speed = 0.0
+            if self.on_progress:
+                self.on_progress(self.segment.index, self.segment.bytes_downloaded, 0.0)
+
     async def download(self) -> None:
-        """Download this segment with retry logic.
-        
-        Uses consecutive failure tracking: if progress was made (bytes downloaded),
-        the consecutive failure counter resets, preventing transient disconnects
-        during large multi-gigabyte transfers from failing prematurely.
-        """
+        """Download this segment with adaptive retry and concurrency feedback."""
         consecutive_failures = 0
+        adaptive_retries = 0
+        max_adaptive_retries = max(self.max_retries, 8)
+
         while consecutive_failures <= self.max_retries and not self._cancelled:
+            if self.concurrency_gate:
+                acquired = await self.concurrency_gate.acquire(
+                    paused_event=self._paused,
+                    is_cancelled=lambda: self._cancelled,
+                )
+                if not acquired or self._cancelled:
+                    return
+
             bytes_before = self.segment.bytes_downloaded
+            released = False
             try:
                 await self._download_range()
                 return
             except asyncio.CancelledError:
                 raise
             except Exception as e:
+                if self.concurrency_gate:
+                    self.concurrency_gate.release()
+                    released = True
+                self._reset_speed()
+
                 bytes_gained = self.segment.bytes_downloaded - bytes_before
+                status_code = getattr(e, "status", None)
+                retry_after = getattr(e, "retry_after", None)
+
+                # Fail fast on permanent URL / auth / missing resource errors
+                if status_code in (401, 404, 410):
+                    self.segment.status = SegmentStatus.ERROR
+                    self.segment.error_message = str(e)
+                    raise
+
+                adapted = False
+                if self.concurrency_gate:
+                    if status_code in (429, 503, 509):
+                        adapted = self.concurrency_gate.report_throttle(
+                            status_code=status_code, retry_after=retry_after
+                        )
+                    elif status_code == 403 and (
+                        bytes_gained > 0 or self.concurrency_gate.has_successful_activity
+                    ):
+                        adapted = self.concurrency_gate.report_throttle(
+                            status_code=403, retry_after=retry_after
+                        )
+                    elif isinstance(
+                        e,
+                        (
+                            aiohttp.ClientConnectionError,
+                            aiohttp.ServerDisconnectedError,
+                            asyncio.TimeoutError,
+                            ConnectionError,
+                        ),
+                    ):
+                        adapted = self.concurrency_gate.report_disconnect()
+
                 if bytes_gained > 0:
                     consecutive_failures = 0
                     logger.info(
                         f"Segment {self.segment.index} made progress (+{bytes_gained} bytes) "
                         f"before error: {e}. Reconnecting..."
                     )
+                elif adapted and adaptive_retries < max_adaptive_retries:
+                    adaptive_retries += 1
                 else:
                     consecutive_failures += 1
 
                 self.segment.retries += 1
                 if consecutive_failures <= self.max_retries and not self._cancelled:
-                    delay = min(self.retry_delay * (2 ** (consecutive_failures - 1)), 30.0) if consecutive_failures > 0 else 1.0
+                    if retry_after is not None:
+                        delay = retry_after
+                    elif adapted:
+                        delay = 0.25  # Gate enforces shared cooldown during acquire()
+                    else:
+                        delay = (
+                            min(self.retry_delay * (2 ** (consecutive_failures - 1)), 30.0)
+                            if consecutive_failures > 0
+                            else 1.0
+                        )
                     logger.warning(
                         f"Segment {self.segment.index} error ({consecutive_failures}/{self.max_retries}): {e}. "
                         f"Retrying in {delay:.1f}s..."
@@ -101,6 +176,10 @@ class SegmentWorker:
                     self.segment.status = SegmentStatus.ERROR
                     self.segment.error_message = str(e)
                     raise
+            finally:
+                self._reset_speed()
+                if self.concurrency_gate and not released:
+                    self.concurrency_gate.release()
 
     async def _download_range(self) -> None:
         """Perform the actual HTTP range request and write to temp file."""
@@ -165,6 +244,16 @@ class SegmentWorker:
                         resp.request_info, resp.history, status=416, message="Range Not Satisfiable"
                     )
 
+                if resp.status in (429, 503, 509):
+                    retry_after = parse_retry_after(resp.headers.get("Retry-After"))
+                    raise ThrottleResponseError(
+                        resp.request_info,
+                        resp.history,
+                        status=resp.status,
+                        message=f"Server throttled request ({resp.status})",
+                        retry_after=retry_after,
+                    )
+
                 if resp.status not in (200, 206):
                     raise aiohttp.ClientResponseError(
                         resp.request_info,
@@ -191,6 +280,8 @@ class SegmentWorker:
 
                             self.segment.bytes_downloaded += len(chunk)
                             speed_window_bytes += len(chunk)
+                            if self.concurrency_gate:
+                                self.concurrency_gate.mark_activity()
 
                             # Calculate speed (sliding window)
                             now = time.monotonic()
@@ -232,6 +323,7 @@ class SegmentWorker:
                 SegmentStatus.COMPLETED,
             )
 
+        self._reset_speed()
         self.segment.status = SegmentStatus.COMPLETED
         logger.info(f"Segment {self.segment.index} completed: {self.segment.bytes_downloaded} bytes")
 
@@ -239,6 +331,7 @@ class SegmentWorker:
         """Pause this segment's download."""
         self._paused.clear()
         self.segment.status = SegmentStatus.PAUSED
+        self._reset_speed()
 
     def resume(self) -> None:
         """Resume this segment's download."""
@@ -249,6 +342,7 @@ class SegmentWorker:
         """Cancel this segment's download."""
         self._cancelled = True
         self._paused.set()  # Unpause so the loop can exit
+        self._reset_speed()
 
     @property
     def speed(self) -> float:

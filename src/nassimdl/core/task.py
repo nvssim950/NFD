@@ -14,6 +14,7 @@ from nassimdl.models.download import (
 )
 from nassimdl.models.config import AppConfig
 from nassimdl.core.segment import SegmentWorker
+from nassimdl.core.adaptive import AdaptiveConcurrencyGate, compute_auto_segments
 from nassimdl.core.merger import FileMerger
 from nassimdl.core.bandwidth import BandwidthController
 from nassimdl.utils.http import probe_url
@@ -48,11 +49,26 @@ class DownloadTask:
         self._worker_tasks: list[asyncio.Task] = []
         self._speed_by_segment: dict[int, float] = {}
         self._start_time: Optional[float] = None
+        self._concurrency_gate: Optional[AdaptiveConcurrencyGate] = None
+        self._probe_latency_ms: float = 0.0
+        self._probe_throttled: bool = False
 
     @property
     def total_speed(self) -> float:
         """Combined download speed across all segments."""
         return sum(self._speed_by_segment.values())
+
+    @property
+    def current_concurrency_limit(self) -> int:
+        if self._concurrency_gate:
+            return self._concurrency_gate.current_limit
+        return self.download.num_segments
+
+    @property
+    def adaptation_reason(self) -> Optional[str]:
+        if self._concurrency_gate and self.download.auto_segments:
+            return self._concurrency_gate.status_reason
+        return None
 
     @property
     def eta(self) -> Optional[float]:
@@ -134,6 +150,8 @@ class DownloadTask:
         self.download.url = result.url  # Follow redirects
         self.download.file_size = result.file_size
         self.download.supports_range = result.supports_range
+        self._probe_latency_ms = result.probe_latency_ms
+        self._probe_throttled = result.retry_after_seconds is not None
 
         # Update filename if server provided a filename (Content-Disposition) or if current has no extension
         if result.filename:
@@ -148,12 +166,9 @@ class DownloadTask:
 
         # Decide segment count
         if result.supports_range and result.file_size:
-            if not self.download.num_segments or self.download.num_segments <= 1:
-                self.download.num_segments = (
-                    self.config.download.default_segments
-                    or self.config.download.get_segments_for_size(result.file_size)
-                )
-            if self.download.file_size and self.download.file_size < self.download.num_segments:
+            if self.download.auto_segments or not self.download.num_segments or self.download.num_segments <= 0:
+                self.download.num_segments = compute_auto_segments(self.config.download, result)
+            elif self.download.file_size < self.download.num_segments:
                 self.download.num_segments = max(1, self.download.file_size)
         else:
             self.download.num_segments = 1
@@ -214,16 +229,29 @@ class DownloadTask:
         logger.info(f"Created {len(self.download.segments)} segments for {self.download.filename}")
 
     async def _download_segments(self) -> None:
-        """Download all segments in parallel."""
+        """Download all segments in parallel with optional adaptive concurrency."""
         self.download.status = DownloadStatus.DOWNLOADING
         await self.db.update_download_status(self.download.id, DownloadStatus.DOWNLOADING)
         self._notify_status()
 
+        incomplete = [seg for seg in self.download.segments if not seg.is_complete]
+        if not incomplete:
+            for seg in self.download.segments:
+                await self.db.update_segment_progress(
+                    seg.id, seg.bytes_downloaded, SegmentStatus.COMPLETED
+                )
+            return
+
+        self._concurrency_gate = AdaptiveConcurrencyGate(
+            total_segments=len(incomplete),
+            auto_mode=self.download.auto_segments,
+            probe_latency_ms=self._probe_latency_ms,
+            probe_throttled=self._probe_throttled,
+        )
+
         # Create workers for incomplete segments
         self._workers = []
-        for seg in self.download.segments:
-            if seg.is_complete:
-                continue
+        for seg in incomplete:
             worker = SegmentWorker(
                 segment=seg,
                 url=self.download.url,
@@ -232,12 +260,17 @@ class DownloadTask:
                 timeout=self.config.network.timeout_seconds,
                 max_retries=self.config.network.max_retries,
                 retry_delay=self.config.network.retry_delay_seconds,
+                concurrency_gate=self._concurrency_gate,
                 on_progress=self._on_segment_progress,
                 on_save_progress=self._on_segment_save,
             )
             self._workers.append(worker)
 
-        # Launch all workers as concurrent tasks
+        monitor_task: Optional[asyncio.Task] = None
+        if self.download.auto_segments and len(incomplete) > 1:
+            monitor_task = asyncio.create_task(self._monitor_adaptation())
+
+        # Launch all workers as concurrent tasks (gated by concurrency_gate)
         self._worker_tasks = [
             asyncio.create_task(w.download()) for w in self._workers
         ]
@@ -252,12 +285,33 @@ class DownloadTask:
                 if not t.done():
                     t.cancel()
             raise
+        finally:
+            if monitor_task is not None:
+                monitor_task.cancel()
+                try:
+                    await monitor_task
+                except asyncio.CancelledError:
+                    pass
 
         for seg in self.download.segments:
             await self.db.update_segment_progress(
                 seg.id, seg.bytes_downloaded, SegmentStatus.COMPLETED
             )
         logger.info(f"All segments downloaded for {self.download.filename}")
+
+    async def _monitor_adaptation(self) -> None:
+        """Periodically evaluate transfer throughput and scale Auto concurrency."""
+        try:
+            while True:
+                await asyncio.sleep(1.5)
+                if not self._concurrency_gate:
+                    break
+                if self.download.status != DownloadStatus.DOWNLOADING:
+                    continue
+                remaining = sum(1 for s in self.download.segments if not s.is_complete)
+                self._concurrency_gate.evaluate_speed(self.total_speed, remaining)
+        except asyncio.CancelledError:
+            pass
 
     async def _merge(self) -> None:
         """Merge segment files into the final output."""

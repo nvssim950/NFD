@@ -78,3 +78,44 @@ async def test_database_crud(tmp_path: Path):
 
     finally:
         await db.close()
+
+
+@pytest.mark.asyncio
+async def test_database_migrates_missing_auto_segments_column(tmp_path: Path):
+    """Ensure existing DBs created before auto_segments migrate cleanly."""
+    import aiosqlite
+
+    db_file = tmp_path / "legacy.db"
+    async with aiosqlite.connect(str(db_file)) as conn:
+        await conn.execute(
+            """CREATE TABLE downloads (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                url TEXT NOT NULL,
+                filename TEXT NOT NULL,
+                output_dir TEXT NOT NULL,
+                file_size INTEGER,
+                status TEXT NOT NULL DEFAULT 'queued',
+                num_segments INTEGER NOT NULL DEFAULT 1,
+                supports_range INTEGER NOT NULL DEFAULT 0,
+                created_at REAL NOT NULL,
+                completed_at REAL,
+                error_message TEXT,
+                hash_type TEXT,
+                expected_hash TEXT
+            )"""
+        )
+        await conn.execute(
+            """INSERT INTO downloads (url, filename, output_dir, num_segments, created_at)
+               VALUES ('https://example.com/a.zip', 'a.zip', '.', 8, 1.0)"""
+        )
+        await conn.commit()
+
+    db = Database(db_file)
+    await db.initialize()
+    try:
+        loaded = await db.get_all_downloads()
+        assert len(loaded) == 1
+        assert loaded[0].num_segments == 8
+        assert loaded[0].auto_segments is False
+    finally:
+        await db.close()

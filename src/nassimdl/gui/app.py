@@ -460,6 +460,7 @@ class NFDApp(tk.Tk):
             initial_url=url,
             initial_filename=filename or "",
             default_dir=self.config_data.download.output_dir,
+            default_mode=self.config_data.download.segment_mode,
             default_segments=self.config_data.download.default_segments,
             on_submit=self._dispatch_add_download,
         )
@@ -479,6 +480,7 @@ class NFDApp(tk.Tk):
             self,
             initial_url=clipboard_text,
             default_dir=self.config_data.download.output_dir,
+            default_mode=self.config_data.download.segment_mode,
             default_segments=self.config_data.download.default_segments,
             on_submit=self._dispatch_add_download,
         )
@@ -495,6 +497,7 @@ class NFDApp(tk.Tk):
                 num_segments=segments,
                 hash_value=hash_val,
                 hash_type="sha256" if hash_val else None,
+                auto_segments=(segments is None),
             ),
             self.loop,
         )
@@ -568,6 +571,7 @@ class NFDApp(tk.Tk):
         if self.manager:
             self.manager.set_speed_limit(self.config_data.network.max_speed_bytes)
             self.manager.config.download.max_concurrent = self.config_data.download.max_concurrent
+            self.manager.config.download.segment_mode = self.config_data.download.segment_mode
             self.manager.config.download.default_segments = self.config_data.download.default_segments
 
     # ── Refresh Loop ───────────────────────────────────────────────────
@@ -629,11 +633,20 @@ class NFDApp(tk.Tk):
 
             speed_str = "—"
             eta_str = "—"
-            if self.manager:
-                task = self.manager.queue.get_task(dl.id)
-                if task:
-                    speed_str = format_speed(task.total_speed)
-                    eta_str = format_eta(task.eta)
+            task = self.manager.queue.get_task(dl.id) if self.manager else None
+            if task:
+                speed_str = format_speed(task.total_speed)
+                eta_str = format_eta(task.eta)
+
+            if dl.auto_segments:
+                if dl.status in (DownloadStatus.QUEUED, DownloadStatus.PROBING) and dl.num_segments <= 0:
+                    streams_str = "Auto"
+                elif task and dl.status == DownloadStatus.DOWNLOADING and task.current_concurrency_limit < dl.num_segments:
+                    streams_str = f"{task.current_concurrency_limit}/{dl.num_segments} (Auto)"
+                else:
+                    streams_str = f"{dl.num_segments} (Auto)"
+            else:
+                streams_str = f"{dl.num_segments} Streams"
 
             progress_bar_chars = self._progress_bar_text(dl.progress)
             created_str = datetime.fromtimestamp(dl.created_at).strftime("%Y-%m-%d %H:%M")
@@ -646,7 +659,7 @@ class NFDApp(tk.Tk):
                 dl.status.value.upper(),
                 speed_str,
                 eta_str,
-                f"{dl.num_segments} Streams",
+                streams_str,
                 created_str,
             )
 
@@ -685,6 +698,17 @@ class NFDApp(tk.Tk):
             return
 
         # Update Info text
+        task = self.manager.queue.get_task(dl.id) if self.manager else None
+        if dl.auto_segments:
+            if dl.num_segments <= 0:
+                stream_info = "Auto (Waiting for size & server probe)"
+            elif task and task.adaptation_reason:
+                stream_info = f"Auto ({dl.num_segments} segments, active limit {task.current_concurrency_limit} — {task.adaptation_reason})"
+            else:
+                stream_info = f"Auto ({dl.num_segments} segments)"
+        else:
+            stream_info = f"Manual ({dl.num_segments} Streams)"
+
         self.info_text.config(state=tk.NORMAL)
         self.info_text.delete("1.0", tk.END)
         info_lines = [
@@ -692,6 +716,7 @@ class NFDApp(tk.Tk):
             f"Destination:      {dl.output_path}",
             f"Source URL:       {dl.url}",
             f"Size:             {format_size(dl.file_size) if dl.file_size else 'Unknown'} ({dl.bytes_downloaded:,} bytes transferred)",
+            f"Streams:          {stream_info}",
             f"Range Support:    {'Yes (Multi-Segment Acceleration Active)' if dl.supports_range else 'No (Single-Stream Fallback)'}",
             f"Checksum:         {dl.hash_type.upper() + ': ' + dl.expected_hash if dl.expected_hash else 'None specified'}",
         ]

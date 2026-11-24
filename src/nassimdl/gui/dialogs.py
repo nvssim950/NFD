@@ -7,6 +7,26 @@ from tkinter import ttk, filedialog, messagebox
 
 from nassimdl.utils.units import parse_size, format_size, format_speed
 
+STREAM_PRESETS = ("Auto", "1", "2", "4", "6", "8", "12", "16", "24", "32")
+
+
+def parse_stream_setting(raw_val: str) -> tuple[bool, int | None]:
+    """Parse stream setting string into (is_auto, segment_count)."""
+    val = str(raw_val).strip()
+    if not val or val.lower().startswith("auto"):
+        return True, None
+    count = int(val)
+    if count < 1 or count > 32:
+        raise ValueError("Parallel streams must be 'Auto' or a number from 1 to 32.")
+    return False, count
+
+
+def format_stream_setting(mode: str, segments: int) -> str:
+    """Format stream mode/count for combobox display."""
+    if mode == "auto":
+        return "Auto"
+    return str(max(1, min(32, segments)))
+
 
 def get_icon_paths() -> tuple[str | None, str | None]:
     ico_path = None
@@ -43,6 +63,7 @@ class AddDownloadDialog(tk.Toplevel):
         initial_url="",
         initial_filename="",
         default_dir=None,
+        default_mode="auto",
         default_segments=8,
         on_submit=None,
     ):
@@ -67,6 +88,7 @@ class AddDownloadDialog(tk.Toplevel):
 
         self.on_submit = on_submit
         self.default_dir = Path(default_dir or (Path.home() / "Downloads"))
+        self.default_mode = default_mode if default_mode in ("auto", "manual") else "auto"
         self.default_segments = max(1, min(32, default_segments))
 
         # Spacious, high-DPI friendly geometry
@@ -131,11 +153,17 @@ class AddDownloadDialog(tk.Toplevel):
         ttk.Label(opt_frame, text="Parallel Streams (Connections):", font=font_label).pack(
             side=tk.LEFT
         )
-        self.segments_var = tk.StringVar(value=str(self.default_segments))
-        self.seg_spin = ttk.Spinbox(
-            opt_frame, from_=1, to=32, textvariable=self.segments_var, width=6, font=font_label
+        self.segments_var = tk.StringVar(
+            value=format_stream_setting(self.default_mode, self.default_segments)
         )
-        self.seg_spin.pack(side=tk.LEFT, padx=(10, 30))
+        self.seg_combo = ttk.Combobox(
+            opt_frame,
+            values=STREAM_PRESETS,
+            textvariable=self.segments_var,
+            width=8,
+            font=font_label,
+        )
+        self.seg_combo.pack(side=tk.LEFT, padx=(10, 26))
 
         ttk.Label(opt_frame, text="SHA-256 (optional):", font=font_label).pack(side=tk.LEFT)
         self.hash_var = tk.StringVar()
@@ -180,16 +208,15 @@ class AddDownloadDialog(tk.Toplevel):
         filename = self.filename_var.get().strip() or None
         output_dir = Path(self.dir_var.get().strip() or self.default_dir)
         try:
-            raw_seg = str(self.segments_var.get()).strip()
-            segments = int(raw_seg) if raw_seg else self.default_segments
-            segments = max(1, min(32, segments))
-        except Exception:
-            segments = self.default_segments
+            is_auto, segments = parse_stream_setting(self.segments_var.get())
+        except Exception as e:
+            messagebox.showwarning("Invalid Streams", str(e), parent=self)
+            return
         hash_val = self.hash_var.get().strip() or None
 
         self.destroy()
         if self.on_submit:
-            self.on_submit(url, filename, output_dir, segments, hash_val)
+            self.on_submit(url, filename, output_dir, None if is_auto else segments, hash_val)
 
 
 class SettingsDialog(tk.Toplevel):
@@ -219,9 +246,9 @@ class SettingsDialog(tk.Toplevel):
         self.on_save = on_save
 
         w = 640
-        h = 360
+        h = 395
         self.geometry(f"{w}x{h}")
-        self.minsize(580, 320)
+        self.minsize(580, 350)
 
         self.update_idletasks()
         sw = self.winfo_screenwidth()
@@ -251,13 +278,27 @@ class SettingsDialog(tk.Toplevel):
         )
 
         # Default Segments
-        ttk.Label(frame, text="Default Parallel Segments:", font=font_label).grid(
-            row=1, column=0, sticky=tk.W, pady=12
+        ttk.Label(frame, text="Default Parallel Streams:", font=font_label).grid(
+            row=1, column=0, sticky=tk.NW, pady=(12, 4)
         )
-        self.segments_var = tk.StringVar(value=str(self.config.download.default_segments))
-        ttk.Spinbox(frame, from_=1, to=32, textvariable=self.segments_var, width=8, font=font_label).grid(
-            row=1, column=1, sticky=tk.W, pady=12
+        seg_box = ttk.Frame(frame)
+        seg_box.grid(row=1, column=1, sticky=tk.W, pady=(12, 4))
+        self.segments_var = tk.StringVar(
+            value=format_stream_setting(self.config.download.segment_mode, self.config.download.default_segments)
         )
+        ttk.Combobox(
+            seg_box,
+            values=STREAM_PRESETS,
+            textvariable=self.segments_var,
+            width=10,
+            font=font_label,
+        ).pack(anchor=tk.W)
+        ttk.Label(
+            seg_box,
+            text="Auto picks 1–16 by file size & adapts to server limits",
+            font=("Segoe UI", 9),
+            foreground="#64748b",
+        ).pack(anchor=tk.W, pady=(4, 0))
 
         # Max Speed Limit
         ttk.Label(frame, text="Speed Limit (0 for unlimited):", font=font_label).grid(
@@ -301,9 +342,12 @@ class SettingsDialog(tk.Toplevel):
             max_concurrent = int(raw_conc) if raw_conc else 3
             self.config.download.max_concurrent = max(1, min(10, max_concurrent))
 
-            raw_seg = str(self.segments_var.get()).strip()
-            default_segments = int(raw_seg) if raw_seg else 8
-            self.config.download.default_segments = max(1, min(32, default_segments))
+            is_auto, seg_count = parse_stream_setting(self.segments_var.get())
+            if is_auto:
+                self.config.download.segment_mode = "auto"
+            else:
+                self.config.download.segment_mode = "manual"
+                self.config.download.default_segments = seg_count
 
             raw_speed = str(self.speed_var.get()).strip()
             speed_mb = int(raw_speed) if raw_speed else 0

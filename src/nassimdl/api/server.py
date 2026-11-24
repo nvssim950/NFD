@@ -44,7 +44,8 @@ class AddDownloadRequest(BaseModel):
     url: str
     output_dir: Optional[str] = None
     filename: Optional[str] = None
-    segments: Optional[int] = Field(default=None, ge=1, le=64)
+    segments: Optional[int] = Field(default=None, ge=0, le=64)
+    auto_segments: Optional[bool] = None
     hash_value: Optional[str] = None
     hash_type: Optional[str] = None
 
@@ -52,6 +53,8 @@ class AddDownloadRequest(BaseModel):
 class ConfigUpdateRequest(BaseModel):
     max_speed_bytes: Optional[int] = None
     max_concurrent: Optional[int] = None
+    segment_mode: Optional[str] = None
+    default_segments: Optional[int] = Field(default=None, ge=1, le=32)
 
 
 def serialize_download(dl: DownloadInfo, active_task=None) -> dict:
@@ -86,6 +89,9 @@ def serialize_download(dl: DownloadInfo, active_task=None) -> dict:
         "progress": round(dl.progress * 100, 1),
         "status": dl.status.value,
         "num_segments": dl.num_segments,
+        "auto_segments": dl.auto_segments,
+        "active_streams": active_task.current_concurrency_limit if active_task else dl.num_segments,
+        "adaptation_reason": active_task.adaptation_reason if active_task else None,
         "supports_range": dl.supports_range,
         "speed": speed,
         "speed_formatted": format_speed(speed),
@@ -120,6 +126,7 @@ async def add_download(req: AddDownloadRequest):
         num_segments=req.segments,
         hash_value=req.hash_value,
         hash_type=req.hash_type,
+        auto_segments=req.auto_segments,
     )
     return {"id": download_id, "message": "Download queued"}
 
@@ -161,6 +168,7 @@ async def get_config():
     cfg = manager.config
     return {
         "max_concurrent": cfg.download.max_concurrent,
+        "segment_mode": cfg.download.segment_mode,
         "default_segments": cfg.download.default_segments,
         "output_dir": str(cfg.download.output_dir),
         "max_speed_bytes": cfg.network.max_speed_bytes,
@@ -178,6 +186,10 @@ async def update_config(req: ConfigUpdateRequest):
         manager.set_speed_limit(req.max_speed_bytes)
     if req.max_concurrent is not None:
         manager.config.download.max_concurrent = req.max_concurrent
+    if req.segment_mode is not None and req.segment_mode in ("auto", "manual"):
+        manager.config.download.segment_mode = req.segment_mode
+    if req.default_segments is not None:
+        manager.config.download.default_segments = req.default_segments
     return {"success": True}
 
 

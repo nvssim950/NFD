@@ -76,6 +76,7 @@ class DownloadManager:
         num_segments: Optional[int] = None,
         hash_value: Optional[str] = None,
         hash_type: Optional[str] = None,
+        auto_segments: Optional[bool] = None,
     ) -> int:
         """
         Add a new download.
@@ -84,14 +85,36 @@ class DownloadManager:
             url: The URL to download.
             output_dir: Where to save the file (default: config output_dir).
             filename: Override the filename (default: auto-detect).
-            num_segments: Override segment count (default: auto based on size).
+            num_segments: Override segment count (0 or None with auto mode = automatic).
             hash_value: Expected hash for verification.
             hash_type: Hash algorithm ('md5', 'sha256', etc.).
+            auto_segments: Explicitly force Auto mode (True) or Manual mode (False).
             
         Returns:
             The download ID.
         """
         from nassimdl.utils.http import extract_filename_from_url
+
+        if auto_segments is True:
+            is_auto = True
+            resolved_segments = 0
+        elif auto_segments is False:
+            is_auto = False
+            raw = num_segments if (num_segments and num_segments > 0) else self.config.download.default_segments
+            resolved_segments = max(1, min(32, raw))
+        else:
+            if num_segments == 0:
+                is_auto = True
+                resolved_segments = 0
+            elif num_segments is not None:
+                is_auto = False
+                resolved_segments = max(1, min(32, num_segments))
+            elif self.config.download.segment_mode == "auto":
+                is_auto = True
+                resolved_segments = 0
+            else:
+                is_auto = False
+                resolved_segments = max(1, min(32, self.config.download.default_segments))
 
         download = DownloadInfo(
             id=0,
@@ -100,11 +123,9 @@ class DownloadManager:
             output_dir=output_dir or self.config.download.output_dir,
             hash_type=hash_type,
             expected_hash=hash_value,
-            num_segments=num_segments if num_segments is not None else self.config.download.default_segments,
+            num_segments=resolved_segments,
+            auto_segments=is_auto,
         )
-
-        if num_segments:
-            download.num_segments = num_segments
 
         download_id = await self.db.save_download(download)
         await self.queue.add(download)

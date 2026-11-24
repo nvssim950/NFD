@@ -65,6 +65,7 @@ class DownloadInfo:
     file_size: Optional[int] = None  # None if unknown
     status: DownloadStatus = DownloadStatus.QUEUED
     num_segments: int = 1
+    auto_segments: bool = False
     supports_range: bool = False
     created_at: float = field(default_factory=time.time)
     completed_at: Optional[float] = None

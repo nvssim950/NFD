@@ -11,21 +11,24 @@ else:
 @dataclass
 class DownloadConfig:
     max_concurrent: int = 3
+    segment_mode: str = "auto"  # "auto" or "manual"
     default_segments: int = 8
     output_dir: Path = field(default_factory=lambda: Path.home() / "Downloads")
     temp_dir: Path = field(default_factory=lambda: Path.home() / ".nassimdl" / "tmp")
     segments_by_size: dict[int, int] = field(default_factory=lambda: {
-        1: 1, 10: 4, 100: 8, 1000: 16
+        0: 1, 5: 4, 50: 8, 500: 12, 1000: 16
     })
 
     def get_segments_for_size(self, size_bytes: int) -> int:
-        """Return the optimal number of segments based on file size."""
+        """Return the optimal number of segments (1-16) based on file size."""
+        if not size_bytes or size_bytes <= 0:
+            return 1
         size_mb = size_bytes / (1024 * 1024)
         result = 1
         for threshold_mb, segments in sorted(self.segments_by_size.items()):
             if size_mb >= threshold_mb:
                 result = segments
-        return result
+        return max(1, min(16, result))
 
 @dataclass
 class NetworkConfig:
@@ -59,6 +62,9 @@ class AppConfig:
             dl = data.get("download", {})
             if "max_concurrent" in dl:
                 config.download.max_concurrent = dl["max_concurrent"]
+            if "segment_mode" in dl:
+                mode = str(dl["segment_mode"]).lower()
+                config.download.segment_mode = mode if mode in ("auto", "manual") else "auto"
             if "default_segments" in dl:
                 config.download.default_segments = dl["default_segments"]
             if "output_dir" in dl:
@@ -101,6 +107,7 @@ class AppConfig:
 
         content = f"""[download]
 max_concurrent = {self.download.max_concurrent}
+segment_mode = "{self.download.segment_mode}"
 default_segments = {self.download.default_segments}
 output_dir = "{output_dir_str}"
 temp_dir = "{temp_dir_str}"

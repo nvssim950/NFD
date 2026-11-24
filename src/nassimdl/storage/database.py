@@ -27,6 +27,7 @@ CREATE TABLE IF NOT EXISTS downloads (
     file_size INTEGER,
     status TEXT NOT NULL DEFAULT 'queued',
     num_segments INTEGER NOT NULL DEFAULT 1,
+    auto_segments INTEGER NOT NULL DEFAULT 0,
     supports_range INTEGER NOT NULL DEFAULT 0,
     created_at REAL NOT NULL,
     completed_at REAL,
@@ -73,7 +74,15 @@ class Database:
         await self._db.execute("PRAGMA journal_mode=WAL")
         await self._db.execute("PRAGMA foreign_keys=ON")
         await self._db.executescript(CREATE_TABLES_SQL)
-        
+
+        # Migrate existing downloads table if auto_segments column is absent
+        async with self._db.execute("PRAGMA table_info(downloads)") as cursor:
+            cols = {row["name"] for row in await cursor.fetchall()}
+        if "auto_segments" not in cols:
+            await self._db.execute(
+                "ALTER TABLE downloads ADD COLUMN auto_segments INTEGER NOT NULL DEFAULT 0"
+            )
+
         # Check/set schema version
         async with self._db.execute("SELECT COUNT(*) FROM schema_version") as cursor:
             row = await cursor.fetchone()
@@ -98,8 +107,8 @@ class Database:
         async with self._db.execute(
             """INSERT INTO downloads
                (url, filename, output_dir, file_size, status, num_segments,
-                supports_range, created_at, hash_type, expected_hash)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                auto_segments, supports_range, created_at, hash_type, expected_hash)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 download.url,
                 download.filename,
@@ -107,6 +116,7 @@ class Database:
                 download.file_size,
                 download.status.value,
                 download.num_segments,
+                1 if download.auto_segments else 0,
                 1 if download.supports_range else 0,
                 download.created_at,
                 download.hash_type,
@@ -255,6 +265,7 @@ class Database:
 
     @staticmethod
     def _row_to_download(row) -> DownloadInfo:
+        row_keys = row.keys()
         return DownloadInfo(
             id=row["id"],
             url=row["url"],
@@ -263,6 +274,7 @@ class Database:
             file_size=row["file_size"],
             status=DownloadStatus(row["status"]),
             num_segments=row["num_segments"],
+            auto_segments=bool(row["auto_segments"]) if "auto_segments" in row_keys else False,
             supports_range=bool(row["supports_range"]),
             created_at=row["created_at"],
             completed_at=row["completed_at"],

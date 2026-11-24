@@ -42,7 +42,7 @@ def add(
     url: str = typer.Argument(..., help="URL to download"),
     output: Optional[Path] = typer.Option(None, "-o", "--output", help="Output directory"),
     filename: Optional[str] = typer.Option(None, "-f", "--filename", help="Override filename"),
-    segments: Optional[int] = typer.Option(None, "-s", "--segments", help="Number of segments"),
+    segments: Optional[int] = typer.Option(None, "-s", "--segments", help="Number of segments (0 = Auto)"),
     hash_value: Optional[str] = typer.Option(None, "--hash", help="Expected file hash"),
     hash_type: Optional[str] = typer.Option(None, "--hash-type", help="Hash algorithm (md5, sha256)"),
     wait: bool = typer.Option(True, "--wait/--no-wait", help="Wait for download to complete"),
@@ -147,7 +147,7 @@ def list_downloads(
             table.add_column("Status", width=12)
             table.add_column("Progress", width=10)
             table.add_column("Size", width=10)
-            table.add_column("Segments", width=8)
+            table.add_column("Segments", width=10)
 
             status_colors = {
                 DownloadStatus.QUEUED: "dim",
@@ -171,7 +171,7 @@ def list_downloads(
                     f"[{color}]{dl.status.value}[/{color}]",
                     progress_pct,
                     size_str,
-                    str(dl.num_segments),
+                    f"{dl.num_segments} (Auto)" if dl.auto_segments and dl.num_segments > 0 else ("Auto" if dl.auto_segments else str(dl.num_segments)),
                 )
 
             console.print(table)
@@ -255,30 +255,53 @@ def config(
     max_speed: Optional[str] = typer.Option(None, "--max-speed", help="Max speed (e.g., 50MB, 0=unlimited)"),
     max_concurrent: Optional[int] = typer.Option(None, "--max-concurrent", help="Max concurrent downloads"),
     output_dir: Optional[Path] = typer.Option(None, "--output-dir", help="Default output directory"),
+    segment_mode: Optional[str] = typer.Option(None, "--segment-mode", help="Stream selection mode (auto or manual)"),
+    default_segments: Optional[int] = typer.Option(None, "--default-segments", help="Manual stream count (1-32)"),
 ):
     """View or update configuration."""
     cfg = AppConfig.load()
+    changed = False
 
     if max_speed is not None:
         speed = parse_size(max_speed)
         cfg.network.max_speed_bytes = speed
+        changed = True
         console.print(f"Max speed: {format_speed(speed) if speed > 0 else 'Unlimited'}")
     
     if max_concurrent is not None:
         cfg.download.max_concurrent = max_concurrent
+        changed = True
         console.print(f"Max concurrent: {max_concurrent}")
     
     if output_dir is not None:
         cfg.download.output_dir = output_dir
+        changed = True
         console.print(f"Output dir: {output_dir}")
 
-    if max_speed is None and max_concurrent is None and output_dir is None:
+    if segment_mode is not None:
+        mode = segment_mode.strip().lower()
+        if mode not in ("auto", "manual"):
+            console.print("[red]Invalid --segment-mode (use 'auto' or 'manual')[/red]")
+            raise typer.Exit(code=1)
+        cfg.download.segment_mode = mode
+        changed = True
+        console.print(f"Segment mode: {mode}")
+
+    if default_segments is not None:
+        cfg.download.default_segments = max(1, min(32, default_segments))
+        changed = True
+        console.print(f"Default segments: {cfg.download.default_segments}")
+
+    if changed:
+        cfg.save()
+    else:
         table = Table(title="⚙️  Configuration")
         table.add_column("Setting", style="cyan")
         table.add_column("Value", style="white")
         table.add_row("Output Directory", str(cfg.download.output_dir))
         table.add_row("Temp Directory", str(cfg.download.temp_dir))
         table.add_row("Max Concurrent", str(cfg.download.max_concurrent))
+        table.add_row("Segment Mode", "Auto (Smart)" if cfg.download.segment_mode == "auto" else "Manual")
         table.add_row("Default Segments", str(cfg.download.default_segments))
         table.add_row("Max Speed", format_speed(cfg.network.max_speed_bytes) if cfg.network.max_speed_bytes > 0 else "Unlimited")
         table.add_row("Timeout", f"{cfg.network.timeout_seconds}s")
